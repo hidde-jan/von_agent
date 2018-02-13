@@ -14,25 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from indy import did, wallet, IndyError
+from indy import did as indy_did
+from indy import wallet, IndyError
 from indy.error import ErrorCode
 
 import json
 import logging
 
+logger = logging.getLogger(__name__)
 
 class Wallet:
     """
     Class encapsulating indy-sdk wallet.
     """
 
-    def __init__(self, pool_name: str, seed: str, name: str, cfg: dict = None) -> None:
+    def __init__(self, pool_name: str, name: str, cfg: dict = None) -> None:
         """
         Initializer for wallet. Store input parameters and create wallet.
         Does not open until open() or __enter__().
 
         :param pool_name: name of pool on which wallet operates
-        :param seed: seed for wallet user
         :param name: name of the wallet
         :param cfg: configuration, None for default;
             i.e., {
@@ -41,11 +42,9 @@ class Wallet:
             }
         """
 
-        logger = logging.getLogger(__name__)
         logger.debug('Wallet.__init__: >>> pool_name {}, seed [SEED], name {}, cfg {}'.format(pool_name, name, cfg))
 
         self._pool_name = pool_name
-        self._seed = seed
         self._name = name
         self._handle = None
         self._cfg = cfg or {}
@@ -163,11 +162,6 @@ class Wallet:
         self._handle = await wallet.open_wallet(self.name, json.dumps(cfg) if cfg else None, None)
         logger.info('Opened wallet {} on handle {}'.format(self.name, self.handle))
 
-        (self._did, self._verkey) = await did.create_and_store_my_did(  # apparently does no harm to overwrite it
-            self._handle,
-            json.dumps({'seed': self._seed}))
-        logger.debug('Wallet.open: stored {}, {}'.format(self._did, self._verkey))
-
         logger.debug('Wallet.open: <<<')
         return self
 
@@ -218,6 +212,33 @@ class Wallet:
             logger.info('Abstaining from wallet removal: {}'.format(sys.exc_info()[0]))
 
         logger.debug('Wallet.close: <<<')
+
+    async def create_did(self, did: str=None, seed: str=None, cid: bool=False) -> str:
+        identity_config = {"did": did, "seed": seed, "cid": cid}
+
+        (self._did, self._verkey) = await indy_did.create_and_store_my_did(
+            self._handle,
+            json.dumps(identity_config))
+        logger.debug('Wallet.create_did: stored {}, {}'.format(self._did, self._verkey))
+
+        return self._did
+
+    async def load_did(self, did: str) -> str:
+        did_json = await indy_did.get_my_did_with_meta(self._handle, did)
+        logger.debug('Wallet.load: {}'.format(did_json))
+        did_info = json.loads(did_json)
+
+        self._did = did_info['did']
+        self._verkey = did_info['verkey']
+
+        return self._did
+
+    async def stored_dids(self):
+        did_json = await indy_did.list_my_dids_with_meta(self._handle)
+        logger.debug('Wallet.stored_dids: {}'.format(did_json))
+
+        return json.loads(did_json)
+
 
     def __repr__(self) -> str:
         """
